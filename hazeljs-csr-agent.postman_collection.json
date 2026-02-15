@@ -1,0 +1,413 @@
+{
+  "info": {
+    "name": "HazelJS Agent CSR API",
+    "description": "Postman collection for testing the AI-powered Customer Service Representative agent. Includes chat, document ingestion, approval workflow, and health check endpoints.\n\n**Prerequisites:**\n- Start the server: `npm run dev`\n- Set OPENAI_API_KEY environment variable",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "sessionId",
+      "value": "postman-session-{{$guid}}"
+    },
+    {
+      "key": "approvalRequestId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Setup",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "health"]
+            },
+            "description": "Check agent runtime health status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "Chat - Order Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has message\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData).to.have.property('sessionId');",
+                  "    pm.expect(jsonData).to.have.property('steps');",
+                  "    pm.expect(jsonData).to.have.property('duration');",
+                  "});",
+                  "",
+                  "pm.test(\"Save sessionId for follow-up\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.sessionId) {",
+                  "        pm.collectionVariables.set('sessionId', jsonData.sessionId);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat"]
+            },
+            "description": "Ask the agent about order status. Uses lookupOrder tool."
+          }
+        },
+        {
+          "name": "Chat - Inventory Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has content\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Is product PROD-001 in stock?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat"]
+            },
+            "description": "Check product inventory. Uses checkInventory tool."
+          }
+        },
+        {
+          "name": "Chat - Follow-up (with memory)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Agent remembers context\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What was the tracking number for that order?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat"]
+            },
+            "description": "Follow-up question using same sessionId. Agent uses conversation memory."
+          }
+        },
+        {
+          "name": "Chat Stream (SSE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat/stream",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat", "stream"]
+            },
+            "description": "Server-Sent Events stream. Response will be text/event-stream."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Knowledge Base",
+      "item": [
+        {
+          "name": "Ingest - Refund Policy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Document was indexed\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('ids');",
+                  "    pm.expect(jsonData.ids).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Refund Policy\",\n  \"content\": \"Full refunds are available within 30 days of purchase. Partial refunds may be granted up to 90 days. Refunds over $500 require manager approval. To request a refund, contact support with your order ID.\",\n  \"metadata\": {\n    \"category\": \"policies\",\n    \"department\": \"customer-service\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/ingest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "ingest"]
+            },
+            "description": "Add refund policy to knowledge base for RAG retrieval"
+          }
+        },
+        {
+          "name": "Ingest - Shipping FAQ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Shipping Information\",\n  \"content\": \"Standard shipping takes 5-7 business days. Express shipping is 2-3 business days. Orders ship from our warehouse within 24 hours. You can update your shipping address before the order ships by contacting support.\",\n  \"metadata\": {\n    \"category\": \"faq\",\n    \"topic\": \"shipping\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/ingest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "ingest"]
+            },
+            "description": "Add shipping FAQ to knowledge base"
+          }
+        },
+        {
+          "name": "Chat - RAG Query (after ingest)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response may have sources\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    if (jsonData.sources && jsonData.sources.length > 0) {",
+                  "        pm.expect(jsonData.sources[0]).to.have.property('content');",
+                  "        pm.expect(jsonData.sources[0]).to.have.property('score');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is your refund policy?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat"]
+            },
+            "description": "Query that triggers RAG - agent searches knowledge base. Run after ingesting documents."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approval Workflow",
+      "item": [
+        {
+          "name": "Approve Tool Execution",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Approval processed\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success', true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{approvalRequestId}}\",\n  \"approved\": true,\n  \"approvedBy\": \"supervisor-123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "approve"]
+            },
+            "description": "Approve a pending tool execution (e.g. processRefund). Get requestId from server logs when agent requests approval."
+          }
+        },
+        {
+          "name": "Reject Tool Execution",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{approvalRequestId}}\",\n  \"approved\": false,\n  \"approvedBy\": \"supervisor-123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "approve"]
+            },
+            "description": "Reject a pending tool execution"
+          }
+        }
+      ]
+    }
+  ]
+}
