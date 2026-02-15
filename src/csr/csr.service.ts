@@ -186,7 +186,26 @@ export class CSRService {
   }
 
   async initialize(): Promise<void> {
-    await this.ragService.initialize();
+    try {
+      await this.ragService.initialize();
+    } catch {
+      // Vector store (Pinecone/Qdrant) unreachable; fall back to in-memory silently
+      const embeddings = new OpenAIEmbeddings({
+        apiKey: process.env.OPENAI_API_KEY || '',
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+      });
+      const fallbackStore = new MemoryVectorStore(embeddings);
+      this.ragService = new RAGService({
+        vectorStore: fallbackStore,
+        embeddingProvider: embeddings,
+        textSplitter: new RecursiveTextSplitter({ chunkSize: 500, chunkOverlap: 50 }),
+        topK: 5,
+      });
+      await this.ragService.initialize();
+      (this.runtime as unknown as { config: { ragService?: RAGService } }).config.ragService =
+        this.ragService as never;
+    }
     await this.memoryManager.initialize();
   }
 
@@ -268,7 +287,7 @@ export class CSRService {
 
   /**
    * Create vector store: Pinecone if PINECONE_API_KEY is set, else Qdrant if QDRANT_URL,
-   * else in-memory MemoryVectorStore.
+   * else in-memory MemoryVectorStore. Empty keys/URLs are treated as unset.
    */
   private createVectorStore(
     embeddings: OpenAIEmbeddings
@@ -284,9 +303,7 @@ export class CSRService {
           indexName: process.env.PINECONE_INDEX || 'csr-knowledge',
         });
       } catch {
-        console.warn(
-          '[CSR] Pinecone config present but @pinecone-database/pinecone not installed. Run: npm install @pinecone-database/pinecone. Using in-memory store.'
-        );
+        // Fall back to memory silently (e.g. package not installed)
       }
     }
 
@@ -297,9 +314,7 @@ export class CSRService {
           collectionName: process.env.QDRANT_COLLECTION || 'csr-knowledge',
         });
       } catch {
-        console.warn(
-          '[CSR] Qdrant config present but @qdrant/js-client-rest not installed. Run: npm install @qdrant/js-client-rest. Using in-memory store.'
-        );
+        // Fall back to memory silently (e.g. package not installed)
       }
     }
 
