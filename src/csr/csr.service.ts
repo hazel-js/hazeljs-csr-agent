@@ -132,9 +132,9 @@ export class CSRService {
       },
     };
 
-    // Create AgentRuntime
+    // Create AgentRuntime (cast to never to avoid duplicate @hazeljs/rag type resolution)
     this.runtime = new AgentRuntime({
-      memoryManager: this.memoryManager,
+      memoryManager: this.memoryManager as never,
       llmProvider,
       ragService: this.ragService as never,
       defaultMaxSteps: 15,
