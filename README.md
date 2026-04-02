@@ -19,12 +19,31 @@ Full-fledged Agent CSR (Customer Service Representative) example using @hazeljs 
 # Install dependencies
 npm install
 
-# Set OpenAI API key
+# Set OpenAI API key (required)
 export OPENAI_API_KEY=your-key
 
 # Run
 npm run dev
 ```
+
+## HCEL (Hazel Composable Expression Language)
+
+This example is designed to be read alongside the docs guide and the code in `src/csr/`.
+
+**Important**: the runnable CSR server in `src/csr/` now executes chat through an HCEL-first path (`ai.hazel ... .agent('csr-agent')`) and keeps `AgentRuntime` as a compatibility fallback. This keeps tool execution and approval workflows stable while simplifying orchestration.
+
+At a high level, HCEL lets you compose “support pipelines” like:
+
+```ts
+const result = await ai.hazel
+  .context({ sessionId: 'customer-1', userId: 'u-1' })
+  .prompt('Customer request: My package arrived damaged, what do I do?')
+  .agent('csr-agent')
+  .observe((e) => console.log('[HCEL]', e.type))
+  .execute();
+```
+
+Docs guide: see `hazeljs-landing/src/content/docs/guides/support-agent.mdx`.
 
 ## API Endpoints
 

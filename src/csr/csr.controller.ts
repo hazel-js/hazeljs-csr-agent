@@ -14,10 +14,7 @@ import {
 import { Swagger, ApiOperation } from '@hazeljs/swagger';
 import { CSRService } from './csr.service';
 import {
-  ChatRequestDto,
   ChatResponseDto,
-  IngestDocumentDto,
-  ApprovalRequestDto,
 } from './csr.types';
 import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
 
@@ -67,6 +64,10 @@ class ApprovalRequest {
 export class CSRController {
   constructor(private csrService: CSRService) {}
 
+  private writeSSE(res: any, payload: Record<string, unknown>): void {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  }
+
   @Post('/chat')
   @ApiOperation({
     summary: 'Send a message to the CSR agent',
@@ -110,17 +111,22 @@ export class CSRController {
   @UsePipes(ValidationPipe)
   async chatStream(
     @Body() dto: ChatRequest,
-    @Res() res: { setHeader: (n: string, v: string) => void; write: (d: string) => void; end: () => void }
+    @Res() res: any
   ): Promise<void> {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
     try {
-      const result = await this.csrService.chat(dto.message, dto.sessionId, dto.userId);
-      res.write(`data: ${JSON.stringify({ type: 'response', data: result })}\n\n`);
+      const stream = this.csrService.chatStream(dto.message, dto.sessionId, dto.userId);
+      for await (const event of stream) {
+        const payload = event.type === 'chunk'
+          ? { type: 'chunk', text: event.text }
+          : { type: 'response', data: event.data };
+        this.writeSSE(res, payload);
+      }
     } catch (error) {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`);
+      this.writeSSE(res, { type: 'error', error: String(error) });
     } finally {
       res.end();
     }
@@ -195,10 +201,11 @@ export class CSRController {
     tags: ['csr'],
   })
   async health(): Promise<Record<string, unknown>> {
-    const runtime = this.csrService.getRuntime();
+    const ai = this.csrService.getPlatform();
     try {
-      const result = await (runtime as { healthCheck?: () => Promise<unknown> }).healthCheck?.();
-      return { status: 'ok', ...(result as object) };
+      // In 0.7.0 we probe metrics or specific facade status
+      const metrics = ai.getMetrics();
+      return { status: 'ok', metrics };
     } catch {
       return { status: 'degraded' };
     }

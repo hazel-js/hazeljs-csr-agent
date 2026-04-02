@@ -21,6 +21,10 @@ export class CSRGateway extends WebSocketGateway {
     super();
   }
 
+  private sendError(clientId: string, message: string): void {
+    this.sendToClient(clientId, 'error', { message });
+  }
+
   protected override handleConnection(client: WebSocketClient): void {
     super.handleConnection(client);
     client.send('connected', {
@@ -38,7 +42,7 @@ export class CSRGateway extends WebSocketGateway {
       const { text, sessionId, userId } = data;
 
       if (!text || typeof text !== 'string') {
-        this.sendToClient(clientId, 'error', { message: 'Invalid message: text is required' });
+        this.sendError(clientId, 'Invalid message: text is required');
         return;
       }
 
@@ -58,19 +62,23 @@ export class CSRGateway extends WebSocketGateway {
     try {
       client.send('thinking', { message: 'Processing your request...' });
 
-      const result = await this.csrService.chat(text, sessionId, userId);
+      const stream = this.csrService.chatStream(text, sessionId, userId);
 
-      client.send('response', {
-        response: result.response,
-        sessionId: result.sessionId,
-        steps: result.steps,
-        duration: result.duration,
-        sources: result.sources,
-      });
+      for await (const event of stream) {
+        if (event.type === 'chunk') {
+          client.send('chunk', { text: event.text });
+        } else if (event.type === 'result') {
+          client.send('response', {
+            response: event.data.response,
+            sessionId: event.data.sessionId,
+            steps: event.data.steps,
+            duration: event.data.duration,
+            sources: event.data.sources,
+          });
+        }
+      }
     } catch (error) {
-      client.send('error', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      this.sendError(clientId, error instanceof Error ? error.message : 'Unknown error');
     }
   }
 }

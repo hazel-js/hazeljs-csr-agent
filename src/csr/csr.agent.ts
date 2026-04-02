@@ -4,12 +4,18 @@
  */
 
 import { Agent, Tool } from '@hazeljs/agent';
-import type { RAGService } from '@hazeljs/rag';
 import { OrderService } from '../services/order.service';
 import { InventoryService } from '../services/inventory.service';
 import { RefundService } from '../services/refund.service';
 import { TicketService } from '../services/ticket.service';
 import type { QueueService } from '@hazeljs/queue';
+
+export interface CSRDependencies {
+  orderService: OrderService;
+  inventoryService: InventoryService;
+  refundService: RefundService;
+  ticketService: TicketService;
+}
 
 const CSR_SYSTEM_PROMPT = `You are a helpful customer support agent for an e-commerce platform.
 You can look up orders, check inventory, process refunds, create support tickets, and search the knowledge base.
@@ -29,11 +35,8 @@ If you don't know something, say so and offer to create a support ticket for esc
 })
 export class CSRAgent {
   constructor(
-    private orderService: OrderService,
-    private inventoryService: InventoryService,
-    private refundService: RefundService,
-    private ticketService: TicketService,
-    private ragService: RAGService,
+    private deps: CSRDependencies,
+    private ragService: any, // RAGService is now handled through the platform facade
     private queueService?: QueueService
   ) {}
 
@@ -49,7 +52,7 @@ export class CSRAgent {
     ],
   })
   async lookupOrder(input: { orderId: string }) {
-    const order = await this.orderService.findById(input.orderId);
+    const order = await this.deps.orderService.findById(input.orderId);
 
     if (!order) {
       return {
@@ -82,7 +85,7 @@ export class CSRAgent {
     ],
   })
   async checkInventory(input: { productId: string }) {
-    const inventory = await this.inventoryService.check(input.productId);
+    const inventory = await this.deps.inventoryService.check(input.productId);
 
     if (!inventory) {
       return {
@@ -126,7 +129,7 @@ export class CSRAgent {
     ],
   })
   async processRefund(input: { orderId: string; amount: number; reason: string }) {
-    const refund = await this.refundService.process({
+    const refund = await this.deps.refundService.process({
       orderId: input.orderId,
       amount: input.amount,
       reason: input.reason,
@@ -160,7 +163,7 @@ export class CSRAgent {
     ],
   })
   async updateShippingAddress(input: { orderId: string; newAddress: Record<string, unknown> }) {
-    const updated = await this.orderService.updateAddress(input.orderId, input.newAddress);
+    const updated = await this.deps.orderService.updateAddress(input.orderId, input.newAddress);
 
     if (!updated) {
       return { success: false, message: `Order ${input.orderId} not found` };
@@ -201,7 +204,7 @@ export class CSRAgent {
     description: string;
     priority?: string;
   }) {
-    const ticket = await this.ticketService.create({
+    const ticket = await this.deps.ticketService.create({
       subject: input.subject,
       description: input.description,
       priority: input.priority,
