@@ -28,6 +28,9 @@ export class CSRService {
   ) {
     const vectorStore = this.resolveVectorStore();
     this.ai = HazelAI.create({
+      defaultProvider: 'openai',
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.1'),
       providers: {
         openai: { apiKey: process.env.OPENAI_API_KEY || '' },
       },
@@ -119,9 +122,17 @@ export class CSRService {
   }
 
   private buildChain(message: string, sessionId: string, userId?: string) {
+    const toolHint = [
+      'You are operating as csr-agent with tool access.',
+      'If an order ID like ORD-12345 is present, call lookupOrder before asking follow-up questions.',
+      'If the customer asks about stock, call checkInventory.',
+      'If customer requests refund/address changes, use appropriate tools and approval workflow.',
+      'Only ask for email/phone/order id if the needed identifier is missing.',
+    ].join(' ');
+
     return this.ai.hazel
       .context({ sessionId, userId })
-      .prompt(`Customer request: ${message}`)
+      .prompt(`${toolHint}\n\nCustomer request: ${message}`)
       .agent('csr-agent');
   }
 
@@ -161,18 +172,7 @@ export class CSRService {
     userId?: string
   ): Promise<ChatResponseDto> {
     const sid = sessionId || `session-${Date.now()}`;
-    try {
-      const startedAt = Date.now();
-      const result = await this.buildChain(message, sid, userId).execute();
-      return this.toChatResponse(sid, {
-        response: typeof result === 'string' ? result : JSON.stringify(result),
-        executionId: `hcel-${startedAt}`,
-        steps: [{ type: 'hcel' }],
-        duration: Date.now() - startedAt,
-      });
-    } catch {
-      return this.chatViaRuntime(message, sid, userId);
-    }
+    return this.chatViaRuntime(message, sid, userId);
   }
 
   async *chatStream(
@@ -181,29 +181,6 @@ export class CSRService {
     userId?: string
   ): AsyncGenerator<{ type: 'chunk'; text: string } | { type: 'result'; data: ChatResponseDto }> {
     const sid = sessionId || `session-${Date.now()}`;
-    const startedAt = Date.now();
-
-    try {
-      let combinedText = '';
-      for await (const chunk of this.buildChain(message, sid, userId).stream()) {
-        const text = String(chunk);
-        combinedText += text;
-        yield { type: 'chunk', text };
-      }
-      yield {
-        type: 'result',
-        data: this.toChatResponse(sid, {
-          response: combinedText,
-          executionId: `hcel-${startedAt}`,
-          steps: [{ type: 'hcel' }],
-          duration: Date.now() - startedAt,
-        }),
-      };
-      return;
-    } catch {
-      // Keep runtime as compatibility fallback for environments where HCEL agent isn't configured.
-    }
-
     for await (const chunk of this.runtime.executeStream('csr-agent', message, {
       sessionId: sid,
       userId,

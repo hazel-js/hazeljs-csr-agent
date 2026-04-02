@@ -31,7 +31,7 @@ If you don't know something, say so and offer to create a support ticket for esc
   enableRAG: true,
   ragTopK: 5,
   maxSteps: 15,
-  temperature: 0.7,
+  temperature: 0.1,
 })
 export class CSRAgent {
   constructor(
