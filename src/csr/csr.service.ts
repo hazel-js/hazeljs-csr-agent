@@ -4,7 +4,12 @@
 
 import { Injectable } from '@hazeljs/core';
 import { AgentEventType, AgentRuntime, AgentService } from '@hazeljs/agent';
-import { HazelAI } from '@hazeljs/ai';
+import { HazelAI, type GraphExecutionResult } from '@hazeljs/ai';
+import {
+  createMemoryStore,
+  MemoryCategory,
+  MemoryService,
+} from '@hazeljs/memory';
 import { OrderService } from '../services/order.service';
 import { InventoryService } from '../services/inventory.service';
 import { RefundService } from '../services/refund.service';
@@ -18,6 +23,7 @@ export class CSRService {
   private ai: HazelAI;
   private runtime: AgentRuntime;
   private queueService?: QueueService;
+  private memoryService: MemoryService | null = null;
 
   constructor(
     private agentService: AgentService,
@@ -31,6 +37,7 @@ export class CSRService {
       defaultProvider: 'openai',
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.1'),
+      agentService: this.agentService as any,
       providers: {
         openai: { apiKey: process.env.OPENAI_API_KEY || '' },
       },
@@ -118,7 +125,26 @@ export class CSRService {
   }
 
   async initialize(): Promise<void> {
-    console.log('🚀 HazelAI Platform initialized');
+    const store = createMemoryStore({ type: 'in-memory' });
+    this.memoryService = new MemoryService(store);
+    await this.memoryService.initialize();
+    console.log('🚀 HazelAI Platform initialized (@hazeljs/memory in-memory store ready for HCEL)');
+  }
+
+  private ensureMemory(): MemoryService {
+    if (!this.memoryService) {
+      throw new Error('MemoryService not ready; ensure CSRService.initialize() ran at bootstrap');
+    }
+    return this.memoryService;
+  }
+
+  private ensureLLMProviderConfigured(): void {
+    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!openaiKey) {
+      throw new Error(
+        'OPENAI_API_KEY is not configured. Set it in your .env and restart the server.'
+      );
+    }
   }
 
   private buildChain(message: string, sessionId: string, userId?: string) {
@@ -143,7 +169,8 @@ export class CSRService {
       executionId?: string;
       steps?: unknown[];
       duration?: number;
-    }
+    },
+    mode?: ChatResponseDto['mode']
   ): ChatResponseDto {
     return {
       response: payload.response || 'I could not generate a response.',
@@ -151,6 +178,29 @@ export class CSRService {
       sessionId: sid,
       steps: payload.steps?.length || 0,
       duration: payload.duration ?? 0,
+      ...(mode ? { mode } : {}),
+    };
+  }
+
+  private graphResultToChatResponse(
+    sid: string,
+    graph: GraphExecutionResult
+  ): ChatResponseDto {
+    let text = graph.response ?? graph.state?.output;
+    if (text == null || text === '') {
+      const nodes = graph.nodeExecutions
+        ? Object.values(graph.nodeExecutions)
+        : [];
+      const last = nodes[nodes.length - 1] as { response?: string } | undefined;
+      text = last?.response;
+    }
+    return {
+      response: text || 'I could not generate a response.',
+      executionId: graph.executionId,
+      sessionId: sid,
+      steps: Array.isArray(graph.steps) ? graph.steps.length : 0,
+      duration: graph.duration ?? 0,
+      mode: 'hcel-pipeline',
     };
   }
 
@@ -171,8 +221,71 @@ export class CSRService {
     sessionId?: string,
     userId?: string
   ): Promise<ChatResponseDto> {
+    this.ensureLLMProviderConfigured();
     const sid = sessionId || `session-${Date.now()}`;
     return this.chatViaRuntime(message, sid, userId);
+  }
+
+  /**
+   * HCEL paths showcasing @hazeljs/memory recall (`variant: 'memory'`) and
+   * `agentPipeline` / compiled graph execution (`variant: 'pipeline'`).
+   */
+  async chatHcel(
+    message: string,
+    variant: 'memory' | 'pipeline' = 'memory',
+    sessionId?: string,
+    userId?: string
+  ): Promise<ChatResponseDto> {
+    this.ensureLLMProviderConfigured();
+    const sid = sessionId || `session-${Date.now()}`;
+
+    if (variant === 'pipeline') {
+      const graph = await this.ai.hazel
+        .context({ sessionId: sid, userId })
+        .agentPipeline({
+          pipelineId: 'csr-example-linear',
+          agents: ['csr-agent'],
+        })
+        .execute(message);
+      return this.graphResultToChatResponse(sid, graph);
+    }
+
+    const memory = this.ensureMemory();
+    const result = await this.ai.hazel
+      .memory(memory)
+      .context({ sessionId: sid, userId })
+      .memoryRecall({
+        category: [MemoryCategory.PREFERENCE, MemoryCategory.EPISODIC],
+        limit: 12,
+        header: 'Known customer context (from @hazeljs/memory):',
+      })
+      .agent('csr-agent')
+      .execute(message);
+
+    return this.toChatResponse(sid, result as any, 'hcel-memory');
+  }
+
+  /**
+   * Save a demo preference so `chatHcel(..., 'memory')` can show recall in the same session/user.
+   */
+  async seedMemoryPreference(input: {
+    userId: string;
+    value: string;
+    key?: string;
+    sessionId?: string;
+  }): Promise<{ id: string }> {
+    const memory = this.ensureMemory();
+    const item = await memory.save({
+      userId: input.userId,
+      sessionId: input.sessionId,
+      category: MemoryCategory.PREFERENCE,
+      key: input.key ?? 'csr-demo-preference',
+      value: input.value,
+      confidence: 1,
+      source: 'explicit',
+      evidence: [],
+    });
+    return { id: item.id };
   }
 
   async *chatStream(
@@ -180,6 +293,7 @@ export class CSRService {
     sessionId?: string,
     userId?: string
   ): AsyncGenerator<{ type: 'chunk'; text: string } | { type: 'result'; data: ChatResponseDto }> {
+    this.ensureLLMProviderConfigured();
     const sid = sessionId || `session-${Date.now()}`;
     for await (const chunk of this.runtime.executeStream('csr-agent', message, {
       sessionId: sid,
@@ -210,6 +324,7 @@ export class CSRService {
     content: string,
     metadata?: Record<string, unknown>
   ): Promise<string[]> {
+    this.ensureLLMProviderConfigured();
     return this.ai.rag.ingest({
       type: 'text',
       content: `${title}\n\n${content}`,

@@ -13,6 +13,8 @@ interface ChatMessage {
   text: string;
   sessionId?: string;
   userId?: string;
+  /** When `memory` or `pipeline`, uses CSRService.chatHcel instead of streaming runtime. */
+  hcelVariant?: 'memory' | 'pipeline';
 }
 
 @Realtime('/csr')
@@ -28,7 +30,8 @@ export class CSRGateway extends WebSocketGateway {
   protected override handleConnection(client: WebSocketClient): void {
     super.handleConnection(client);
     client.send('connected', {
-      message: 'Connected to CSR agent. Send { event: "message", data: { text: "..." } }',
+      message:
+        'Connected to CSR agent. Send { event: "message", data: { text: "..." } }. Optional data.hcelVariant: "memory" | "pipeline" uses HCEL (non-streaming).',
       clientId: client.id,
       timestamp: new Date().toISOString(),
     });
@@ -39,14 +42,14 @@ export class CSRGateway extends WebSocketGateway {
 
     if (message.event === 'message') {
       const data = (message.data || {}) as ChatMessage;
-      const { text, sessionId, userId } = data;
+      const { text, sessionId, userId, hcelVariant } = data;
 
       if (!text || typeof text !== 'string') {
         this.sendError(clientId, 'Invalid message: text is required');
         return;
       }
 
-      this.handleChatMessage(clientId, text, sessionId, userId);
+      this.handleChatMessage(clientId, text, sessionId, userId, hcelVariant);
     }
   }
 
@@ -54,13 +57,32 @@ export class CSRGateway extends WebSocketGateway {
     clientId: string,
     text: string,
     sessionId?: string,
-    userId?: string
+    userId?: string,
+    hcelVariant?: 'memory' | 'pipeline'
   ): Promise<void> {
     const client = this.getClient(clientId);
     if (!client) return;
 
     try {
       client.send('thinking', { message: 'Processing your request...' });
+
+      if (hcelVariant === 'memory' || hcelVariant === 'pipeline') {
+        const data = await this.csrService.chatHcel(
+          text,
+          hcelVariant,
+          sessionId,
+          userId
+        );
+        client.send('response', {
+          response: data.response,
+          sessionId: data.sessionId,
+          steps: data.steps,
+          duration: data.duration,
+          mode: data.mode,
+          sources: data.sources,
+        });
+        return;
+      }
 
       const stream = this.csrService.chatStream(text, sessionId, userId);
 

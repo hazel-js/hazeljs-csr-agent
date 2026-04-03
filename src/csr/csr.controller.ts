@@ -16,7 +16,13 @@ import { CSRService } from './csr.service';
 import {
   ChatResponseDto,
 } from './csr.types';
-import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsObject,
+  IsIn,
+} from 'class-validator';
 
 class ChatRequest {
   @IsString()
@@ -52,6 +58,40 @@ class ApprovalRequest {
 
   @IsString()
   approvedBy!: string;
+}
+
+class HcelChatRequest {
+  @IsString()
+  message!: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['memory', 'pipeline'])
+  variant?: 'memory' | 'pipeline';
+}
+
+class MemorySeedRequest {
+  @IsString()
+  userId!: string;
+
+  @IsString()
+  value!: string;
+
+  @IsOptional()
+  @IsString()
+  key?: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }
 
 @Swagger({
@@ -97,6 +137,60 @@ export class CSRController {
   @UsePipes(ValidationPipe)
   async chat(@Body() dto: ChatRequest): Promise<ChatResponseDto> {
     return this.csrService.chat(dto.message, dto.sessionId, dto.userId);
+  }
+
+  @Post('/chat/hcel')
+  @ApiOperation({
+    summary: 'Chat via HCEL (memory recall or agent pipeline)',
+    description:
+      'variant=memory: chains .memory() → .memoryRecall() → .agent("csr-agent"). variant=pipeline: .agentPipeline() with csr-agent (GraphExecutionResult).',
+    tags: ['csr'],
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['message'],
+            properties: {
+              message: { type: 'string' },
+              sessionId: { type: 'string' },
+              userId: { type: 'string' },
+              variant: { type: 'string', example: 'memory' },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      '200': { description: 'Agent response; mode field indicates HCEL path used' },
+    },
+  })
+  @UsePipes(ValidationPipe)
+  async chatHcel(@Body() dto: HcelChatRequest): Promise<ChatResponseDto> {
+    return this.csrService.chatHcel(
+      dto.message,
+      dto.variant ?? 'memory',
+      dto.sessionId,
+      dto.userId
+    );
+  }
+
+  @Post('/memory/seed')
+  @ApiOperation({
+    summary: 'Seed a preference for HCEL memory recall demo',
+    description:
+      'Stores a PREFERENCE item; use the same userId (and optional sessionId) with POST /chat/hcel variant=memory to see recall.',
+    tags: ['csr'],
+  })
+  @UsePipes(ValidationPipe)
+  async seedMemory(@Body() dto: MemorySeedRequest): Promise<{ id: string }> {
+    return this.csrService.seedMemoryPreference({
+      userId: dto.userId,
+      value: dto.value,
+      key: dto.key,
+      sessionId: dto.sessionId,
+    });
   }
 
   @Post('/chat/stream')

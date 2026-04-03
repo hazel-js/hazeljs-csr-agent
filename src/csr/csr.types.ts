@@ -14,6 +14,8 @@ export interface ChatResponseDto {
   sessionId: string;
   steps: number;
   duration: number;
+  /** Present when the reply was produced via HCEL (`/chat/hcel`). */
+  mode?: 'hcel-memory' | 'hcel-pipeline';
   sources?: Array<{
     id: string;
     content: string;

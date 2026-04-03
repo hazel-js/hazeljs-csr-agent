@@ -1,9 +1,9 @@
 {
   "info": {
     "name": "HazelJS Agent CSR API",
-    "description": "Postman collection for testing the AI-powered Customer Service Representative agent. Includes chat, document ingestion, approval workflow, and health check endpoints.\n\n**Prerequisites:**\n- Start the server: `npm run dev`\n- Set OPENAI_API_KEY environment variable",
+    "description": "Postman collection for testing the AI-powered Customer Service Representative agent. Includes runtime chat, HCEL chat (memory recall + agent pipeline via `/api/csr/chat/hcel`), `@hazeljs/memory` seeding (`/api/csr/memory/seed`), document ingestion, approval workflow, and health check.\n\n**Prerequisites:**\n- Start the server: `npm run dev`\n- Ensure `CSRService.initialize()` runs (default bootstrap) so the in-memory memory store is ready\n- Set OPENAI_API_KEY",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "variable": [
     {
@@ -17,6 +17,10 @@
     {
       "key": "approvalRequestId",
       "value": ""
+    },
+    {
+      "key": "userId",
+      "value": "postman-user-1"
     }
   ],
   "item": [
@@ -97,7 +101,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/csr/chat",
@@ -136,7 +140,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"Is product PROD-001 in stock?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+              "raw": "{\n  \"message\": \"Is product PROD-001 in stock?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/csr/chat",
@@ -175,7 +179,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"What was the tracking number for that order?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+              "raw": "{\n  \"message\": \"What was the tracking number for that order?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/csr/chat",
@@ -197,7 +201,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/csr/chat/stream",
@@ -205,6 +209,131 @@
               "path": ["api", "csr", "chat", "stream"]
             },
             "description": "Server-Sent Events stream. Response will be text/event-stream."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HCEL & @hazeljs/memory",
+      "description": "Hazel Composable Expression Language: memory recall before `csr-agent`, or sequential `agentPipeline`. Run **Seed preference** first to see recall in the memory variant.",
+      "item": [
+        {
+          "name": "Memory - Seed preference",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Returns saved id\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"key\": \"postman-demo-preference\",\n  \"value\": \"Customer prefers email updates and Express shipping when available.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/memory/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "memory", "seed"]
+            },
+            "description": "Stores a PREFERENCE in the in-memory `@hazeljs/memory` store. Use the same `userId` (and optional `sessionId`) with **Chat HCEL - memory recall**."
+          }
+        },
+        {
+          "name": "Chat HCEL - memory recall",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"HCEL memory mode\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData).to.have.property('mode', 'hcel-memory');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Summarize how I like to be contacted and shipped orders.\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\",\n  \"variant\": \"memory\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat/hcel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat", "hcel"]
+            },
+            "description": "HCEL chain: `.memory()` → `.memoryRecall()` (preference + episodic) → `.agent('csr-agent')`. Response includes `mode: \"hcel-memory\"`. Run **Memory - Seed preference** first for a visible recall."
+          }
+        },
+        {
+          "name": "Chat HCEL - agent pipeline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"HCEL pipeline mode\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData).to.have.property('mode', 'hcel-pipeline');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the status of my order ORD-12345?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\",\n  \"variant\": \"pipeline\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/csr/chat/hcel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csr", "chat", "hcel"]
+            },
+            "description": "HCEL `.agentPipeline()` with a single step (`csr-agent`). Response includes `mode: \"hcel-pipeline\"` and graph-style `executionId` / `steps` when returned by the runtime."
           }
         }
       ]
@@ -319,7 +448,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"What is your refund policy?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"postman-user-1\"\n}"
+              "raw": "{\n  \"message\": \"What is your refund policy?\",\n  \"sessionId\": \"{{sessionId}}\",\n  \"userId\": \"{{userId}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/csr/chat",
